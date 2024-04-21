@@ -4,38 +4,44 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from bs4 import BeautifulSoup
 import pymongo
-import time
+from dotenv import load_dotenv
+import os
+load_dotenv()
 
-def scrape_bse_website():
+DB_ATLAS = os.getenv("DB_ATLAS")
+CHROME_DRIVER_PATH = os.getenv("CHROME_DRIVER_PATH")
+
+def scrape_bse_website(CHROME_DRIVER_PATH):
     # Setup Chrome WebDriver
     chrome_options = Options()
     chrome_options.add_argument("--headless")  # Run Chrome in headless mode
-    chrome_driver_path = r"C:\Users\HP\OneDrive\Desktop\chromedriver-win64\chromedriver.exe"  # Adjust the path accordingly
-    service = Service(executable_path=chrome_driver_path)
+    #chrome_driver_path = r"C:\Users\HP\OneDrive\Desktop\chromedriver-win64\chromedriver.exe"  # Adjust the path accordingly
+    service = Service(executable_path=CHROME_DRIVER_PATH)
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
     # Open BSE India website
-    driver.get("https://www.bseindia.com")
+    driver.get("https://www.bseindia.com/")
 
     # Wait for the page to fully load
     WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
-    # Extract the page source
-    page_source = driver.page_source
-    soup = BeautifulSoup(page_source, 'html.parser')
-
-    # Find all elements containing h1 and p tags
-    h1_elements = soup.find_all("h1")
-    p_elements = soup.find_all("p")
-
-    # Extract text from h1 and p elements
+    # Extract h1 headings
+    h1_elements = driver.find_elements(By.TAG_NAME, "h1")
     h1_texts = [element.text.strip() for element in h1_elements]
-    p_texts = [element.text.strip() for element in p_elements]
 
-    # Combine h1 and p texts
-    combined_data = [{"h1": h1_text, "p": p_text} for h1_text, p_text in zip(h1_texts, p_texts)]
+    # Extract PDF links
+    pdf_links = []
+    pdf_elements = driver.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
+    for element in pdf_elements:
+        pdf_links.append((element.text.strip(), element.get_attribute("href")))
+
+    # Extract XBRL codes
+    xbrl_elements = driver.find_elements(By.CSS_SELECTOR, "div.xbrl-code")
+    xbrl_codes = [element.text.strip() for element in xbrl_elements]
+
+    # Combine all data
+    combined_data = {"headings": h1_texts, "pdf_links": pdf_links, "xbrl_codes": xbrl_codes}
 
     return combined_data
 
@@ -43,14 +49,11 @@ def save_to_mongodb(data):
     client = pymongo.MongoClient("mongodb+srv://pappu:pappu123@cluster0.whsucgh.mongodb.net/")
     db = client["bse_data"]
     collection = db["homepage_data"]
-    if data:  # Check if data is not empty
-        collection.insert_many(data)
-        print("Data saved to MongoDB")
-    else:
-        print("No data to save")
+    collection.insert_one(data)
+    print("Data saved to MongoDB")
 
 def main():
-    scraped_data = scrape_bse_website()  # Scrape BSE website homepage
+    scraped_data = scrape_bse_website(CHROME_DRIVER_PATH)  # Scrape BSE website homepage
     save_to_mongodb(scraped_data)  # Save homepage data to MongoDB
 
 if __name__ == "__main__":
